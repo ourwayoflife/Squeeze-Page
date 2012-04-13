@@ -1,0 +1,414 @@
+<?php
+/**
+ * @file
+ * Code for the Squeeze Page feature.
+ */
+
+define('PROVIDER_MAILCHIMP', 1);
+define('PROVIDER_INFINITE', 2);
+define('PROVIDER_INFINITE_EMAIL_VARNAME', 'e');
+define('ASSETS_DIR', drupal_get_path('module', 'squeeze_page') . '/assets');
+
+include_once('squeeze_page.features.inc');
+include_once('squeeze_page.settings.inc');
+include_once('inc/squeeze_page.forms.inc');
+
+function squeeze_page_menu() {
+  $items['squeezepage/mcconfig'] = array(
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('squeeze_page_mcconfig'), 
+    'access arguments' => array('access administration pages'), 
+    'type' => MENU_CALLBACK
+  );
+  
+  return $items;  
+}
+
+function squeeze_page_mypage() {
+  $output = '<div style="background:#ffffcc;border:2px solid #808000;padding:15px;0px">';
+  $output .= drupal_render(drupal_get_form('squeeze_page_testform'));
+  $output .= '</div>';
+  return $output;  
+}
+
+function squeeze_page_install() {
+  theme_enable(array('omega'));
+  _squeeze_page_store_layout_settings();
+  _squeeze_page_store_panels_display();
+  _squeeze_page_store_panels_pane();
+  //_squeeze_page_configure_themekey();
+  drupal_flush_all_caches();
+}
+
+function squeeze_page_node_view($node, $view_mode) {
+  $clearCount = variable_get('squeeze_page_cleared');
+  if ($clearCount < 2) {
+    drupal_flush_all_caches();
+    variable_set('squeeze_page_cleared', $clearCount + 1);
+  }
+}
+
+function squeeze_page_form_advanced_squeeze_page_node_form_alter(&$form, &$form_state, $form_id) {    
+  $formArgs = $form_state['build_info']['args'];
+  $mailinglistConfig = array(); 
+  if (isset($formArgs[0]->field_mailinglist_config)) {
+    $mailinglistConfig = unserialize($formArgs[0]->field_mailinglist_config['und'][0]['value']);
+  }
+
+  //hide this field
+  $form['field_mailinglist_config']['#type'] = 'hidden';
+  
+  $form['mprovider'] = array(
+    '#type' => 'select',
+    '#title' => 'Mailing List Provider',
+    '#options' => array(
+      PROVIDER_MAILCHIMP => 'Mailchimp',
+      PROVIDER_INFINITE => 'Infinite'
+    ),
+    '#default_value' => isset($mailinglistConfig['provider']) ? $mailinglistConfig['provider'] : '',   
+  ); 
+  
+  $mailchimpLists = mailchimp_get_lists();
+  
+  $options = array();
+  foreach($mailchimpLists as $id => $list) {
+    $options[$id] = $list['name'];
+  }
+  
+  $form['mcmailinglist'] = array(
+    '#type' => 'select',
+    '#title' => 'Select List',
+    '#options' => $options,
+    '#states' => array(
+      'visible' => array(
+        'select[name="mprovider"]' => array('value' => (string) PROVIDER_MAILCHIMP)
+      ),
+    )    
+  ); 
+  
+  if (!count($mailchimpLists)) { 
+    $form['mcmailinglist']['#description'] = '<div style="color:#000;background:#FFFF00;border:1px solid #FF0000;padding:5px;">'.
+      'You see no option above because you might have not configured Mailchimp yet. '.l('Configure it', 'admin/config/services/mailchimp').
+      ' now and then clear your cache when done.</div>';    
+  }  
+  
+  $form['mcredurl'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Redirect Url',
+    '#description' => t('The url to go after signing up successfully.'),
+    '#states' => array(
+      'visible' => array(
+        'select[name="mprovider"]' => array('value' => (string) PROVIDER_MAILCHIMP)
+      ),
+    )    
+  );   
+  
+  $form['iformcode'] = array(
+    '#type' => 'textarea',
+    '#title' => 'Paste Infinite Form Code',      
+    '#states' => array(
+      'visible' => array(
+        'select[name="mprovider"]' => array('value' => (string) PROVIDER_INFINITE)
+      ),
+    )    
+  );      
+  
+  if (isset($mailinglistConfig['provider'])) {
+    switch ($mailinglistConfig['provider']) {
+      case PROVIDER_MAILCHIMP:
+        $form['mcmailinglist']['#default_value'] = $mailinglistConfig['mailinglist'];
+        $form['mcredurl']['#default_value'] = $mailinglistConfig['redurl'];
+        break;
+      case PROVIDER_INFINITE: 
+        $form['iformcode']['#default_value'] = $mailinglistConfig['iformcode'];
+        break;
+    }
+  }
+}
+
+function squeeze_page_form_basic_squeeze_page_node_form_alter(&$form, &$form_state, $form_id) {    
+  $formArgs = $form_state['build_info']['args'];
+  $mailinglistConfig = array(); 
+  if (isset($formArgs[0]->field_mailinglist_config1)) {
+    $mailinglistConfig = unserialize($formArgs[0]->field_mailinglist_config1['und'][0]['value']);
+  }
+
+  //hide this field
+  $form['field_mailinglist_config1']['#type'] = 'hidden';
+  
+  $form['mprovider'] = array(
+    '#type' => 'select',
+    '#title' => 'Mailing List Provider',
+    '#options' => array(
+      PROVIDER_MAILCHIMP => 'Mailchimp',
+      PROVIDER_INFINITE => 'Infinite'
+    ),
+    '#default_value' => isset($mailinglistConfig['provider']) ? $mailinglistConfig['provider'] : '',   
+  ); 
+  
+  $mailchimpLists = mailchimp_get_lists();
+  
+  $options = array();
+  foreach($mailchimpLists as $id => $list) {
+    $options[$id] = $list['name'];
+  }
+  
+  $form['mcmailinglist'] = array(
+    '#type' => 'select',
+    '#title' => 'Select List',
+    '#options' => $options,
+    '#states' => array(
+      'visible' => array(
+        'select[name="mprovider"]' => array('value' => (string) PROVIDER_MAILCHIMP)
+      ),
+    )    
+  ); 
+  
+  if (!count($mailchimpLists)) { 
+    $form['mcmailinglist']['#description'] = '<div style="color:#000;background:#FFFF00;border:1px solid #FF0000;padding:5px;">'.
+      'You see no option above because you might have not configured Mailchimp yet. '.l('Configure it', 'admin/config/services/mailchimp').
+      ' now and then clear your cache when done.</div>';    
+  }  
+  
+  $form['mcredurl'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Redirect Url',
+    '#description' => t('The url to go after signing up successfully.'),
+    '#states' => array(
+      'visible' => array(
+        'select[name="mprovider"]' => array('value' => (string) PROVIDER_MAILCHIMP)
+      ),
+    )    
+  );   
+  
+  $form['iformcode'] = array(
+    '#type' => 'textarea',
+    '#title' => 'Paste Infinite Form Code',      
+    '#states' => array(
+      'visible' => array(
+        'select[name="mprovider"]' => array('value' => (string) PROVIDER_INFINITE)
+      ),
+    )    
+  );      
+  
+  if (isset($mailinglistConfig['provider'])) {
+    switch ($mailinglistConfig['provider']) {
+      case PROVIDER_MAILCHIMP:
+        $form['mcmailinglist']['#default_value'] = $mailinglistConfig['mailinglist'];
+        $form['mcredurl']['#default_value'] = $mailinglistConfig['redurl'];
+        break;
+      case PROVIDER_INFINITE: 
+        $form['iformcode']['#default_value'] = $mailinglistConfig['iformcode'];
+        break;
+    }
+  }
+}
+
+function squeeze_page_node_validate($node, $form, &$form_state) {
+  $formValues = $form_state['values']; 
+  if ($node->type == 'advanced_squeeze_page') {
+    if($formValues['mprovider'] == PROVIDER_MAILCHIMP && $formValues['mcredurl'] && !valid_url($formValues['mcredurl'], true)) {
+      form_set_error('mcredurl', t('Please enter a valid url.'));
+    } 
+  }
+}
+
+function squeeze_page_node_presave($node) {    
+  if ($node->type == 'basic_squeeze_page' || $node->type == 'advanced_squeeze_page') {  
+    $mailingConfig = array();
+    $mailingConfig['provider'] = $node->mprovider;
+    
+    switch ($node->mprovider) {
+      case PROVIDER_MAILCHIMP:
+        $mailingConfig['mailinglist'] = $node->mcmailinglist;
+        $mailingConfig['redurl'] = $node->mcredurl;
+        break;
+      case PROVIDER_INFINITE:                
+        $mailingConfig['iformcode'] = $node->iformcode;            
+        break;
+    }
+  
+    if ($node->type == 'basic_squeeze_page') {
+      $node->field_mailinglist_config1['und'][0]['value'] = serialize($mailingConfig);
+    }
+    elseif ($node->type == 'advanced_squeeze_page') {
+      $node->field_mailinglist_config['und'][0]['value'] = serialize($mailingConfig);
+    }
+  }
+}
+
+function squeeze_page_render_basic_form($entity) {  
+  $mailingConfig = unserialize($entity->field_mailinglist_config1['und'][0]['value']); 
+  
+  switch ($mailingConfig['provider']) {
+    case PROVIDER_MAILCHIMP:      
+      $params = array(
+        'provider' => PROVIDER_MAILCHIMP,        
+        'emailVarName' => 'email',
+        'hiddenvars' => array('list' => $mailingConfig['mailinglist'], 'redurl' => $mailingConfig['redurl']),
+        'node_id' => $entity->nid,
+      ); 
+      if (empty($mailingConfig['mailinglist']['list'])) {
+        $params['invalid'] = true;
+      }  
+      break;
+    case PROVIDER_INFINITE:  
+      $params['provider'] = PROVIDER_INFINITE;          
+      $form = new DOMDocument();
+      $form->loadHTML($mailingConfig['iformcode']);
+      $formNode = $form->getElementsByTagName('form')->item(0); 
+      $inputNodes = array();
+      if ($formNode) {
+        $params['action'] = $formNode->getAttribute('action');
+        $params['method'] = $formNode->getAttribute('method');
+        $inputNodes = $formNode->getElementsByTagName('input');
+      }            
+      
+      $hiddenElements = '';
+      foreach ($inputNodes as $item) {
+        if ($item->getAttribute('name') == 'h') {
+          if (preg_match('|^checked$|i', $item->getAttribute('checked'))) {
+            $hiddenElements['h'] = $item->getAttribute('value');
+          }    
+        }
+        
+        if (preg_match('|^hidden$|i', $item->getAttribute('type'))) {
+          $hiddenElements[$item->getAttribute('name')] = $item->getAttribute('value');
+        }
+      }    
+
+      $params['emailVarName'] = PROVIDER_INFINITE_EMAIL_VARNAME;
+      $params['hiddenvars'] = $hiddenElements;  
+      $params['node_id'] = $entity->nid;
+
+      if (!isset($params['action']) || !isset($params['method']) || !count($params['hiddenvars'])) {
+        $params['invalid'] = true;
+      }
+      break;      
+  }
+  
+  $form = drupal_render(drupal_get_form('squeeze_page_basic_signup', $params));
+  
+  return $form;
+}
+
+function squeeze_page_render_advanced_form($entity, $orient = 'horizontal') {  
+  $mailingConfig = unserialize($entity->field_mailinglist_config['und'][0]['value']); 
+  
+  $params['orient'] = $orient;
+  
+  switch ($mailingConfig['provider']) {
+    case PROVIDER_MAILCHIMP:      
+      $params = array(
+        'provider' => PROVIDER_MAILCHIMP,
+        'orient' => $orient,
+        'emailVarName' => 'email',
+        'hiddenvars' => array('list' => $mailingConfig['mailinglist'], 'redurl' => $mailingConfig['redurl']),
+        'node_id' => $entity->nid,
+      ); 
+      if (empty($mailingConfig['mailinglist']['list'])) {
+        $params['invalid'] = true;
+      }  
+      break;
+    case PROVIDER_INFINITE:  
+      $params['provider'] = PROVIDER_INFINITE;          
+      $form = new DOMDocument();
+      $form->loadHTML($mailingConfig['iformcode']);
+      $formNode = $form->getElementsByTagName('form')->item(0); 
+      $inputNodes = array();
+      if ($formNode) {
+        $params['action'] = $formNode->getAttribute('action');
+        $params['method'] = $formNode->getAttribute('method');
+        $inputNodes = $formNode->getElementsByTagName('input');
+      }            
+      
+      $hiddenElements = '';
+      foreach ($inputNodes as $item) {
+        if ($item->getAttribute('name') == 'h') {
+          if (preg_match('|^checked$|i', $item->getAttribute('checked'))) {
+            $hiddenElements['h'] = $item->getAttribute('value');
+          }    
+        }
+        
+        if (preg_match('|^hidden$|i', $item->getAttribute('type'))) {
+          $hiddenElements[$item->getAttribute('name')] = $item->getAttribute('value');
+        }
+      }    
+
+      $params['emailVarName'] = PROVIDER_INFINITE_EMAIL_VARNAME;
+      $params['hiddenvars'] = $hiddenElements;  
+      $params['node_id'] = $entity->nid;
+
+      if (!isset($params['action']) || !isset($params['method']) || !count($params['hiddenvars'])) {
+        $params['invalid'] = true;
+      }
+      break;      
+  }
+  
+  $form = drupal_render(drupal_get_form('squeeze_page_advanced_signup', $params));
+  
+  return $form;
+}
+
+function squeeze_page_mcconfig($form, &$form_state) { 
+  drupal_set_title(t('Mailchimp Error'));
+  
+  $form['message'] = array(
+    '#markup' => '<div><p><strong>Something has gone wrong with mailchimp. '.
+      'Please check if you\'ve configured it already.</strong></p><p><strong>**Note: Clear all cache after '.
+      'your configuration.</strong></p></div>'
+  );
+  
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Configure Now'),
+  );
+  
+  $form['#action'] = url('admin/config/services/mailchimp');
+  
+  return $form;
+}
+
+function squeeze_page_theme_registry_alter(&$theme_registry) {
+  if (isset($theme_registry['page'])){
+    $theme_registry['page']['preprocess functions'][] = 'squeeze_page_custom_preprocess_page';
+  } 
+}
+
+function squeeze_page_custom_preprocess_page(&$vars) {  
+  if (arg(0) == 'node' && is_numeric(arg(1))) {  	    
+    $node = node_load(arg(1));
+    $node_type = $node->type;                
+    $squeezePages = array('basic_squeeze_page', 'advanced_squeeze_page');
+    if (in_array($node_type, $squeezePages)) {      	
+      $vars['title'] = '';
+      $vars['site_name'] = '';
+      $vars['site_slogan'] = '';
+      $vars['primary_navigation'] = '';
+      $vars['secondary_menu'] = '';
+      $vars['main_menu'] = array();
+      $vars['linked_site_logo'] = '';
+      $vars['logo_img'] = '';
+      $vars['logo'] = '';
+      //print_r($vars);die; 
+    }
+  }
+}
+
+function squeeze_page_block_view($delta = '') {
+  echo 'asfafafsd';die;
+}
+
+function squeeze_page_block_view_alter(&$data, $block) {
+  //remove all blocks except content for this content type
+  if (arg(0) == 'node' && is_numeric(arg(1))) {
+  	$node = node_load(arg(1));
+    $node_type = $node->type;   
+    $squeezePages = array('basic_squeeze_page', 'advanced_squeeze_page');
+    if (in_array($node_type, $squeezePages)) {
+      if (isset($block->delta) && $block->delta != 'main') {
+        $data = array();
+      }	
+    }    	
+  }
+}
